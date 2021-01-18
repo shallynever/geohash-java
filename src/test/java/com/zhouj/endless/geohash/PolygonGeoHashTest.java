@@ -81,6 +81,33 @@ public class PolygonGeoHashTest extends TestCase {
     }
 
     @Test
+    public void testBoundaryFractalEvenlyByShuPan() {
+        List<WGS84Point> pointList = Arrays.asList(new WGS84Point(30.339721, 120.068368),
+                new WGS84Point(30.289839, 120.388021),
+                new WGS84Point(30.078052, 120.293735),
+                new WGS84Point(30.158026, 119.939587));
+        System.out.println("<====>boundaryFractalEvenly<====>");
+        long start = System.currentTimeMillis();
+        Set<GeoHash> boundaryFractalSet = PolygonGeoHash.boundaryFractalEvenly(pointList, 4, 7, Integer.MAX_VALUE);
+        System.out.println("boundaryFractal==> " + boundaryFractalSet.size() + " ======> " + (System.currentTimeMillis() - start));
+        System.out.println("<============================================================>");
+        Map<Integer, Long> statisticsMap = new HashMap<>();
+        Set<String> gepHashSet = new HashSet<>(boundaryFractalSet.size());
+        for (GeoHash geoHash : boundaryFractalSet) {
+            if (Objects.isNull(statisticsMap.get(geoHash.getCharacterPrecision()))) {
+                statisticsMap.put(geoHash.getCharacterPrecision(), 1L);
+            } else {
+                statisticsMap.put(geoHash.getCharacterPrecision(), statisticsMap.get(geoHash.getCharacterPrecision()) + 1);
+            }
+            gepHashSet.add(geoHash.toBase32());
+        }
+        for (Map.Entry<Integer, Long> entry : statisticsMap.entrySet()) {
+            System.out.println(entry.getKey() + " <==> " + entry.getValue());
+        }
+        System.out.println(gepHashSet);
+    }
+
+    @Test
     public void testPredictionGeoHashLength() {
         List<WGS84Point> pointList = Arrays.asList(new WGS84Point(0, 0),
                 new WGS84Point(0.1, 0),

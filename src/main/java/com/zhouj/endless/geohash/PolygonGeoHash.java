@@ -1,7 +1,5 @@
 package com.zhouj.endless.geohash;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.TypeReference;
 import com.zhouj.endless.geohash.util.BoundingBoxGeoHashIterator;
 import com.zhouj.endless.geohash.util.TwoGeoHashBoundingBox;
 
@@ -21,18 +19,90 @@ public class PolygonGeoHash {
     private static Integer MIN_DESIRED_PRECISION = 1;
     private static Integer DEFAULT_MAX_GEO_HASH_COUNT = 8000;
 
-    static String errMap = "{4:[0.17578125,0.3515625],5:[0.0439453125,0.0439453125],6:[0.0054931640625,0.010986328125],7:[0.001373291015625,0.001373291015625]}";
-    public static Map<Integer, List<Double>> geoHashErrMap = JSON.parseObject(errMap, new TypeReference<Map<Integer, List<Double>>>() {
-    });
+    public static Map<Integer, List<Double>> geoHashErrMap = new HashMap();
+
+    static {
+        geoHashErrMap.put(4, Arrays.asList(0.17578125, 0.3515625));
+        geoHashErrMap.put(5, Arrays.asList(0.0439453125, 0.0439453125));
+        geoHashErrMap.put(6, Arrays.asList(0.0054931640625, 0.010986328125));
+        geoHashErrMap.put(7, Arrays.asList(0.001373291015625, 0.001373291015625));
+    }
 
     /**
-     * 均匀边界分形，最多8000个GeoHash,最长精度为：7
+     * 均匀边界分形
      *
      * @param sourcePointList     经纬度列表
      * @param minDesiredPrecision 最小期望精度
      * @param minDesiredPrecision 最大期望精度
      * @param maxGeoHashCount     geoHash最大数量
-     * @return GeoHash集合
+     * @return GeoHash字符串集合
+     */
+    public static Set<String> boundaryFractalEvenlySegmentation(List<WGS84Point> sourcePointList, Integer minDesiredPrecision, Integer maxDesiredPrecision, Integer maxGeoHashCount) {
+        // 结果集合
+        Set<String> geoHashResultSet = new HashSet<>();
+        Set<GeoHash> geoHashSet = boundaryFractalEvenly(sourcePointList, minDesiredPrecision, maxDesiredPrecision, maxGeoHashCount);
+        for (GeoHash geoHash : geoHashSet) {
+            geoHashResultSet.add(geoHash.toBase32());
+        }
+        return geoHashResultSet;
+    }
+
+    /**
+     * 边界分形，递归，不限制geoHash个数
+     *
+     * @param pointList 经纬度列表
+     * @return GeoHash字符串集合
+     */
+    public static Set<String> boundaryFractalSegmentation(List<WGS84Point> pointList) {
+        // 结果集合
+        Set<String> geoHashResultSet = new HashSet<>();
+        Set<GeoHash> geoHashSet = boundaryFractal(pointList);
+        for (GeoHash geoHash : geoHashSet) {
+            geoHashResultSet.add(geoHash.toBase32());
+        }
+        return geoHashResultSet;
+    }
+
+    /**
+     * 瓦片分割
+     *
+     * @param pointList        地理围栏经纬度列表
+     * @param desiredPrecision 期望精度
+     * @return GeoHash字符串集合
+     */
+    public static Set<String> tilesSegmentation(List<WGS84Point> pointList, Integer desiredPrecision) {
+        Set<String> geoHashResultSet = new HashSet<>();
+        Set<GeoHash> geoHashSet = tiles(pointList, desiredPrecision);
+        for (GeoHash geoHash : geoHashSet) {
+            geoHashResultSet.add(geoHash.toBase32());
+        }
+        return geoHashResultSet;
+    }
+
+    /**
+     * 按照位偏移
+     *
+     * @param pointList        地理围栏经纬度列表
+     * @param desiredPrecision 期望精度
+     * @return GeoHash字符串集合
+     */
+    public static Set<String> offsetStepSegmentation(List<WGS84Point> pointList, Integer desiredPrecision) {
+        Set<String> geoHashResultSet = new HashSet<>();
+        Set<GeoHash> geoHashSet = offsetStep(pointList, desiredPrecision);
+        for (GeoHash geoHash : geoHashSet) {
+            geoHashResultSet.add(geoHash.toBase32());
+        }
+        return geoHashResultSet;
+    }
+
+    /**
+     * 均匀边界分形
+     *
+     * @param sourcePointList     经纬度列表
+     * @param minDesiredPrecision 最小期望精度
+     * @param minDesiredPrecision 最大期望精度
+     * @param maxGeoHashCount     geoHash最大数量
+     * @return GeoHash对象集合
      */
     public static Set<GeoHash> boundaryFractalEvenly(List<WGS84Point> sourcePointList, Integer minDesiredPrecision, Integer maxDesiredPrecision, Integer maxGeoHashCount) {
         // 结果集合
@@ -59,11 +129,18 @@ public class PolygonGeoHash {
             maxGeoHashCount = DEFAULT_MAX_GEO_HASH_COUNT;
         }
         // 粗粒度GeoHash
-        Set<GeoHash> geoHashSetMin = tiles(sourcePointList, minDesiredPrecision);
-        if (geoHashSetMin.size() > maxGeoHashCount) {
-            throw new IllegalArgumentException("地理围栏面积过大");
+        Set<GeoHash> geoHashSetMin = null;
+        for (int i = minDesiredPrecision; i <= maxDesiredPrecision; i++) {
+            geoHashSetMin = tiles(sourcePointList, i);
+            if (geoHashSetMin.size() > maxGeoHashCount) {
+                throw new IllegalArgumentException("地理围栏面积过大");
+            }
+            if (geoHashSetMin.size() > 0) {
+                minDesiredPrecision = i;
+                break;
+            }
         }
-        Set<GeoHash> remainingGeoHashSet = iterator2(geoHashSetMin, sourcePointList, geoHashResultSet, maxGeoHashCount);
+        Set<GeoHash> remainingGeoHashSet = iterator(geoHashSetMin, sourcePointList, geoHashResultSet, maxGeoHashCount);
         if (geoHashResultSet.size() >= maxGeoHashCount) {
             return geoHashResultSet;
         }
@@ -85,61 +162,10 @@ public class PolygonGeoHash {
      * @param pointList 经纬度列表
      * @return GeoHash集合
      */
-    public static Set<String> boundaryFractal(List<WGS84Point> pointList) {
-        Set<String> geoHashStrSet = new HashSet<>();
-        addGeoHashStr(pointList, geoHashStrSet, pointList, 5);
-        return geoHashStrSet;
-    }
-
-    /**
-     * 瓦片分割
-     *
-     * @param pointList
-     * @param desiredPrecision
-     * @return
-     */
-    public static Set<String> tilesSegmentation(List<WGS84Point> pointList, Integer desiredPrecision) {
-        Set<String> geoHashStrSet = new HashSet<>();
-        Set<GeoHash> geoHashSet = tiles(pointList, desiredPrecision);
-        for (GeoHash geoHash : geoHashSet) {
-            geoHashStrSet.add(geoHash.toBase32());
-        }
-        return geoHashStrSet;
-    }
-
-    /**
-     * @param wgs84PointList      地理围栏集合
-     * @param sourcePointList     源地理围栏经纬度列表
-     * @param geoHashStrResultSet 结果
-     */
-    private static void addGeoHashStr(List<WGS84Point> wgs84PointList, Set<String> geoHashStrResultSet, List<WGS84Point> sourcePointList, int desiredPrecision) {
-        Set<GeoHash> geoHashSet = tiles(wgs84PointList, desiredPrecision);
-        Iterator<GeoHash> iterator = geoHashSet.iterator();
-        while (iterator.hasNext()) {
-            GeoHash geoHash = iterator.next();
-            // 判断GeoHash的四个点是否在在地理围栏内
-            if (isGeoHashInPolygon(geoHash, sourcePointList)) {
-                if (geoHashStrResultSet.size() > Long.MAX_VALUE) {
-                    return;
-                }
-                geoHashStrResultSet.add(geoHash.toBase32());
-                iterator.remove();
-            } else {
-                // 如果精度大于7，中点在地理围栏内即可
-                if (desiredPrecision > DEFAULT_MAX_DESIRED_PRECISION) {
-                    if (isPointInPolygon(geoHash.getBoundingBox().getCenter(), sourcePointList)) {
-                        geoHashStrResultSet.add(geoHash.toBase32());
-                    }
-                } else {
-                    BoundingBox box = geoHash.getBoundingBox();
-                    List<WGS84Point> subWGS84PointList = Arrays.asList(box.getNorthWestCorner(), box.getNorthEastCorner(), box.getSouthEastCorner(), box.getSouthWestCorner());
-                    addGeoHashStr(subWGS84PointList, geoHashStrResultSet, sourcePointList, ++desiredPrecision);
-                }
-            }
-            if (geoHashStrResultSet.size() > Long.MAX_VALUE) {
-                return;
-            }
-        }
+    public static Set<GeoHash> boundaryFractal(List<WGS84Point> pointList) {
+        Set<GeoHash> geoHashResultSet = new HashSet<>();
+        appendToResultSet(pointList, geoHashResultSet, pointList, 5);
+        return geoHashResultSet;
     }
 
     /**
@@ -186,18 +212,18 @@ public class PolygonGeoHash {
      * @param desiredPrecision 期望精度
      * @return GeoHash集合
      */
-    public static List<String> offsetStep(List<WGS84Point> pointList, Integer desiredPrecision) {
+    public static Set<GeoHash> offsetStep(List<WGS84Point> pointList, Integer desiredPrecision) {
         desiredPrecision = desiredPrecision == null ? DEFAULT_MAX_DESIRED_PRECISION : desiredPrecision;
         // 多边形外界框
         TwoGeoHashBoundingBox twoGeoHashBoundingBox = getTwoGeoHashBoundingBox(pointList, desiredPrecision);
         BoundingBoxGeoHashIterator iterator = new BoundingBoxGeoHashIterator(twoGeoHashBoundingBox);
         // GeoHash集合
-        List<String> geoHashList = new ArrayList<>();
+        Set<GeoHash> geoHashSet = new HashSet<>();
         // 从西南角到东北角
         while (iterator.hasNext()) {
-            geoHashList.add(iterator.next().toBase32());
+            geoHashSet.add(iterator.next());
         }
-        return geoHashList;
+        return geoHashSet;
     }
 
     /**
@@ -237,6 +263,69 @@ public class PolygonGeoHash {
             throw new IllegalArgumentException("所选围栏不合理");
         }
         return predictionGeoHashLength;
+    }
+
+    /**
+     * 将地理围栏转为GeoHash添加到结果集合中,递归实现
+     *
+     * @param wgs84PointList   地理围栏集合
+     * @param sourcePointList  源地理围栏经纬度列表
+     * @param geoHashResultSet 结果
+     */
+    private static void appendToResultSet(List<WGS84Point> wgs84PointList, Set<GeoHash> geoHashResultSet, List<WGS84Point> sourcePointList, int desiredPrecision) {
+        Set<GeoHash> geoHashSet = tiles(wgs84PointList, desiredPrecision);
+        Iterator<GeoHash> iterator = geoHashSet.iterator();
+        while (iterator.hasNext()) {
+            GeoHash geoHash = iterator.next();
+            // 判断GeoHash的四个点是否在在地理围栏内
+            if (isGeoHashInPolygon(geoHash, sourcePointList)) {
+                if (geoHashResultSet.size() > Long.MAX_VALUE) {
+                    return;
+                }
+                geoHashResultSet.add(geoHash);
+                iterator.remove();
+            } else {
+                // 如果精度大于7，中点在地理围栏内即可
+                if (desiredPrecision > DEFAULT_MAX_DESIRED_PRECISION) {
+                    if (isPointInPolygon(geoHash.getBoundingBox().getCenter(), sourcePointList)) {
+                        geoHashResultSet.add(geoHash);
+                    }
+                } else {
+                    BoundingBox box = geoHash.getBoundingBox();
+                    List<WGS84Point> subWGS84PointList = Arrays.asList(box.getNorthWestCorner(), box.getNorthEastCorner(), box.getSouthEastCorner(), box.getSouthWestCorner());
+                    appendToResultSet(subWGS84PointList, geoHashResultSet, sourcePointList, ++desiredPrecision);
+                }
+            }
+            if (geoHashResultSet.size() > Long.MAX_VALUE) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * 将粗粒度的GeoHash集合精细化，并添加到结果集中
+     *
+     * @param geoHashSet       需要精细化的GeoHash集合
+     * @param desiredPrecision 期望GeoHash精度
+     * @param sourcePointList  源地理围栏经纬度列表
+     * @param geoHashResultSet 结果集合
+     * @return 剩余需要精度细化的GeoHash集合
+     */
+    private static Set<GeoHash> appendToResultSet(Set<GeoHash> geoHashSet, Integer desiredPrecision, List<WGS84Point> sourcePointList, Set<GeoHash> geoHashResultSet, Integer maxGeoHashCount) {
+        // GeoHash5
+        Set<GeoHash> remainingGeoHashSet = new HashSet<>();
+        // 精度细化
+        for (GeoHash geoHash : geoHashSet) {
+            BoundingBox box = geoHash.getBoundingBox();
+            List<WGS84Point> wgs84PointList = Arrays.asList(box.getNorthWestCorner(), box.getNorthEastCorner(), box.getSouthEastCorner(), box.getSouthWestCorner());
+            // GeoHash5
+            Set<GeoHash> geoHashSet5 = tiles(wgs84PointList, desiredPrecision);
+            remainingGeoHashSet.addAll(iterator(geoHashSet5, sourcePointList, geoHashResultSet, maxGeoHashCount));
+        }
+        if (geoHashResultSet.size() >= maxGeoHashCount) {
+            return null;
+        }
+        return remainingGeoHashSet;
     }
 
     /**
@@ -325,7 +414,6 @@ public class PolygonGeoHash {
         return (iSum % 2) != 0;
     }
 
-
     /**
      * 西南角&东北角
      *
@@ -368,7 +456,7 @@ public class PolygonGeoHash {
         return lonLat;
     }
 
-    private static Set<GeoHash> iterator2(Set<GeoHash> geoHashSet, List<WGS84Point> sourcePointList, Set<GeoHash> geoHashResultSet, Integer maxGeoHashCount) {
+    private static Set<GeoHash> iterator(Set<GeoHash> geoHashSet, List<WGS84Point> sourcePointList, Set<GeoHash> geoHashResultSet, Integer maxGeoHashCount) {
         Set<GeoHash> remainingGeoHash = new HashSet<>();
         Iterator<GeoHash> iterator = geoHashSet.iterator();
         while (iterator.hasNext()) {
@@ -394,49 +482,6 @@ public class PolygonGeoHash {
                 } else {
                     remainingGeoHash.add(geoHash);
                 }
-            }
-        }
-        // 返回剩余
-        return remainingGeoHash;
-    }
-
-    /**
-     * @param geoHashSet
-     * @param desiredPrecision
-     * @param sourcePointList
-     * @param geoHashResultSet
-     * @return 返回剩余需要精度细化的GeoHash集合
-     */
-    private static Set<GeoHash> appendToResultSet(Set<GeoHash> geoHashSet, Integer desiredPrecision, List<WGS84Point> sourcePointList, Set<GeoHash> geoHashResultSet, Integer maxGeoHashCount) {
-        // GeoHash5
-        Set<GeoHash> remainingGeoHashSet = new HashSet<>();
-        // 精度细化
-        for (GeoHash geoHash : geoHashSet) {
-            BoundingBox box = geoHash.getBoundingBox();
-            List<WGS84Point> wgs84PointList = Arrays.asList(box.getNorthWestCorner(), box.getNorthEastCorner(), box.getSouthEastCorner(), box.getSouthWestCorner());
-            // GeoHash5
-            Set<GeoHash> geoHashSet5 = tiles(wgs84PointList, desiredPrecision);
-            remainingGeoHashSet.addAll(iterator2(geoHashSet5, sourcePointList, geoHashResultSet, maxGeoHashCount));
-        }
-        if (geoHashResultSet.size() >= maxGeoHashCount) {
-            return null;
-        }
-        return remainingGeoHashSet;
-    }
-
-    private static Set<GeoHash> iterator(Set<GeoHash> geoHashSet, List<WGS84Point> sourcePointList, Set<GeoHash> geoHashResultSet) {
-        Set<GeoHash> remainingGeoHash = new HashSet<>();
-        Iterator<GeoHash> iterator = geoHashSet.iterator();
-        while (iterator.hasNext()) {
-            GeoHash geoHash = iterator.next();
-            // 判断GeoHash的四个点是否在在地理围栏内
-            if (isGeoHashInPolygon(geoHash, sourcePointList)) {
-                if (geoHashResultSet.size() > DEFAULT_MAX_GEO_HASH_COUNT) {
-                    break;
-                }
-                geoHashResultSet.add(geoHash);
-            } else {
-                remainingGeoHash.add(geoHash);
             }
         }
         // 返回剩余
