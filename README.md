@@ -1,4 +1,4 @@
-❕说明：基于此https://github.com/kungfoo/geohash-java修改，增加PolygonGeoHash
+❕说明：基于此 https://github.com/kungfoo/geohash-java 项目增加PolygonGeoHash
 
 ## 功能介绍
 该工具提供了geohash相关操作的方法，主要包括：
